@@ -224,6 +224,24 @@ All HTTP runners can serve any app. The runner reads the `Host` header, looks up
 - **Failure handling**: CLI run retries are opt-in per app (default 0, since user code may not be idempotent); dead-letter topic for poison messages.
 - **Versioning/rollback**: versions are immutable; deploy = pointer move; rollback = move it back.
 
+## Local Development
+
+**1. Unit tests with in-process fakes (no Docker)**
+
+- **Object store**: all access goes through the `object_store::ObjectStore` trait (wrapped in `common`). Tests use `object_store::memory::InMemory`; `LocalFileSystem` is handy for manual debugging; prod uses `AmazonS3` pointed at Garage. No hand-written mock needed.
+- **Kafka**: a small `CommandBus` trait in `common` (`publish(topic, key, msg)`, `subscribe(topic, group)`), with an in-memory implementation (tokio channels) for tests and an `rdkafka` implementation for real use. Control plane and runner logic are tested against the in-memory bus.
+- **Postgres**: not mocked. Use `sqlx` with `#[sqlx::test]`, which creates a fresh database per test on a real Postgres. The scheduler's `FOR UPDATE SKIP LOCKED` claiming is only meaningful against real Postgres.
+- **Wasmtime**: no mock; tests load the components built from `examples/`.
+
+**2. Local stack with real dependencies (`docker compose`, services via `cargo run`)**
+
+- `postgres` – plain image.
+- Kafka – `apache/kafka` single node in KRaft mode (no ZooKeeper). An init step creates `cli.run`, `http.deploy`, `run.events`.
+- Garage – `dxflrs/garage` single node (replication factor 1); an init script assigns/applies the layout and creates the `apps` and `logs` buckets plus a dev access key.
+- No gateway: `runner-http` listens on `:8080` and routes by `Host`. `*.localhost` resolves to `127.0.0.1` in browsers and curl, so `http://hello.apps.localhost:8080` works without DNS or TLS. Control plane on `:3000`, web dev server on `:5173` (allowed via CORS).
+- Configuration from env vars (`DATABASE_URL`, `KAFKA_BROKERS`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, …) loaded from `.env`.
+- `justfile` targets: `dev-up` / `dev-down` (compose), `build-examples` (`cargo build --target wasm32-wasip2`), `deploy-example` (upload + deploy via the API).
+
 ## Repository Layout
 
 Cargo workspace:
@@ -237,5 +255,8 @@ common/          # shared types: Kafka message schemas, app model, storage clien
 web/               # dashboard UI (web server)
 examples/          # sample wasm apps
 deploy/            # Helm chart / kustomize manifests
+deploy/dev/        # docker-compose.yml, garage-init.sh, Kafka topic init
 docs/
+justfile           # dev-up, dev-down, build-examples, deploy-example
+.env.example       # local config (DATABASE_URL, KAFKA_BROKERS, S3_*)
 ```
