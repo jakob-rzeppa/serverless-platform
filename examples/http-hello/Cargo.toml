@@ -1,0 +1,9 @@
+[package]
+name = "http-hello"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wstd = "0.6"
