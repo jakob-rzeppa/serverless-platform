@@ -1,0 +1,33 @@
+[package]
+name = "common"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock", "std"] }
+dotenvy = "0.15.7"
+flate2 = "1.1.10"
+futures = "0.3.34"
+object_store = { version = "0.14.2", features = ["aws"], optional = true }
+rdkafka = { version = "0.39.0", features = ["tokio"], optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["sync", "time"] }
+tracing = "0.1.44"
+uuid = { version = "1.29.0", features = ["serde", "v4"] }
+
+[features]
+default = ["kafka", "s3"]
+# Real adapters.
+kafka = ["dep:rdkafka"]
+s3 = ["dep:object_store"]
+# In-memory mock adapters (MemoryBus, MemoryStorage). Enable only from
+# [dev-dependencies] so they never end up in release binaries.
+mock = []
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread"] }

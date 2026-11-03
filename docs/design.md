@@ -228,8 +228,11 @@ All HTTP runners can serve any app. The runner reads the `Host` header, looks up
 
 **1. Unit tests with in-process fakes (no Docker)**
 
-- **Object store**: all access goes through the `object_store::ObjectStore` trait (wrapped in `common`). Tests use `object_store::memory::InMemory`; `LocalFileSystem` is handy for manual debugging; prod uses `AmazonS3` pointed at Garage. No hand-written mock needed.
-- **Kafka**: a small `CommandBus` trait in `common` (`publish(topic, key, msg)`, `subscribe(topic, group)`), with an in-memory implementation (tokio channels) for tests and an `rdkafka` implementation for real use. Control plane and runner logic are tested against the in-memory bus.
+`common` uses the adapter pattern: services depend on traits, and the concrete adapter is injected at startup.
+
+- **Object store**: typed `storage::ObjectStorage<O>` (one handle per bucket). Operations are implemented per object kind (`impl ObjectStorage<Artifact>`, `impl ObjectStorage<CliLogChunk>`), each taking that kind's key and contents types and validating/encoding them (`Artifact` must be a wasm component, `CliLogChunk` is gzip NDJSON), so only valid objects are uploaded. Real adapter via `ObjectStorage::s3` (`object_store` crate, path-style for Garage); mock via `ObjectStorage::memory(&MemoryStorage)`.
+- **Kafka**: typed `bus::Publisher<M>` / `bus::Subscriber<M>` per message kind (`CliRun`, `HttpDeploy`, `RunEvent`); topic, key and encoding are fixed per kind, and commits are explicit. Real adapter rdkafka (one shared producer connection); mock `MemoryBus` (single consumer group, inspectable published messages and committed offsets).
+- Mocks are behind `common`'s `mock` feature, enabled only from `[dev-dependencies]`, so they never end up in release binaries.
 - **Postgres**: not mocked. Use `sqlx` with `#[sqlx::test]`, which creates a fresh database per test on a real Postgres. The scheduler's `FOR UPDATE SKIP LOCKED` claiming is only meaningful against real Postgres.
 - **Wasmtime**: no mock; tests load the components built from `examples/`.
 
@@ -239,7 +242,7 @@ All HTTP runners can serve any app. The runner reads the `Host` header, looks up
 - Kafka – `apache/kafka` single node in KRaft mode (no ZooKeeper). An init step creates `cli.run`, `http.deploy`, `run.events`.
 - Garage – `dxflrs/garage` single node (replication factor 1); an init script assigns/applies the layout and creates the `apps` and `logs` buckets plus a dev access key.
 - No gateway: `runner-http` listens on `:8080` and routes by `Host`. `*.localhost` resolves to `127.0.0.1` in browsers and curl, so `http://hello.apps.localhost:8080` works without DNS or TLS. Control plane on `:3000`, web dev server on `:5173` (allowed via CORS).
-- Configuration from env vars (`DATABASE_URL`, `KAFKA_BROKERS`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, …) loaded from `.env`.
+- Configuration from env vars, loaded by `common::env::load_dotenv`. Shared values (`KAFKA_BROKERS`, `S3_*`, buckets) live in `<root>/.env`, service-specific values in `<service>/.env`, and a gitignored `.env.local` next to each overrides it. Real process env always wins.
 - `justfile` targets: `dev-up` / `dev-down` (compose), `build-examples` (`cargo build --target wasm32-wasip2`), `deploy-example` (upload + deploy via the API).
 
 ## Repository Layout
@@ -248,15 +251,15 @@ Cargo workspace:
 
 ```
 control-plane/   # HTTP API + scheduler
-runner-core/     # shared wasmtime host lib: engine, limits, WASI ctx, artifact cache
+runner-core/     # (later, with runner-http) shared wasmtime host lib extracted from runner-cli
 runner-cli/      # binary + image: Kafka cli.run consumer
 runner-http/     # binary + image: wasi:http server, Host-based routing
-common/          # shared types: Kafka message schemas, app model, storage client
+common/          # Kafka message schemas, bus + storage adapters (+ mocks), log format, env loading
 web/               # dashboard UI (web server)
 examples/          # sample wasm apps
 deploy/            # Helm chart / kustomize manifests
 deploy/dev/        # docker-compose.yml, garage-init.sh, Kafka topic init
 docs/
 justfile           # dev-up, dev-down, build-examples, deploy-example
-.env.example       # local config (DATABASE_URL, KAFKA_BROKERS, S3_*)
+.env               # shared local config; <service>/.env for specific, .env.local overrides (gitignored)
 ```
