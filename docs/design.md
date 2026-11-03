@@ -251,7 +251,7 @@ Cargo workspace:
 
 ```
 control-plane/   # HTTP API + scheduler
-runner-core/     # (later, with runner-http) shared wasmtime host lib extracted from runner-cli
+runner-core/     # shared wasmtime host lib (engine, sandbox limits, WASI ctx, artifact cache, output capture)
 runner-cli/      # binary + image: Kafka cli.run consumer
 runner-http/     # binary + image: wasi:http server, Host-based routing
 common/          # Kafka message schemas, bus + storage adapters (+ mocks), log format, env loading

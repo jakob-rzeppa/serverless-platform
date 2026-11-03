@@ -4,10 +4,10 @@ Shared code for the platform services: a typed message bus (Kafka message kinds)
 
 Services use typed handles. The concrete adapter is chosen at startup:
 
-| Handle | Real adapter | Mock adapter |
-|--------|--------------|--------------|
-| `bus::Publisher<M>` | `Publisher::kafka(&KafkaProducer)` | `Publisher::memory(&MemoryBus)` |
-| `bus::Subscriber<M>` | `Subscriber::<M>::kafka(brokers, group_id)` | `Subscriber::<M>::memory(&MemoryBus)` |
+| Handle                      | Real adapter                                 | Mock adapter                            |
+| --------------------------- | -------------------------------------------- | --------------------------------------- |
+| `bus::Publisher<M>`         | `Publisher::kafka(&KafkaProducer)`           | `Publisher::memory(&MemoryBus)`         |
+| `bus::Subscriber<M>`        | `Subscriber::<M>::kafka(brokers, group_id)`  | `Subscriber::<M>::memory(&MemoryBus)`   |
 | `storage::ObjectStorage<O>` | `ObjectStorage::s3(&S3Config)` (Garage / S3) | `ObjectStorage::memory(&MemoryStorage)` |
 
 Bus and storage follow the same layout:
@@ -28,11 +28,11 @@ bus/                         storage/
 
 Each message kind has its own file in `bus/messages/`. That file holds the struct and its `impl Publisher<Kind>` / `impl Subscriber<Kind>` blocks, which fix the topic, the partition key (always `app_id`) and the JSON encoding:
 
-| Kind | Topic | Published by | Consumed by |
-|------|-------|--------------|-------------|
-| `cli_run::CliRun` | `cli.run` | control plane (manual + scheduler) | runner-cli |
-| `http_deploy::HttpDeploy` | `http.deploy` | control plane | runner-http |
-| `run_event::RunEvent` | `run.events` | runners | control plane |
+| Kind                      | Topic         | Published by                       | Consumed by   |
+| ------------------------- | ------------- | ---------------------------------- | ------------- |
+| `cli_run::CliRun`         | `cli.run`     | control plane (manual + scheduler) | runner-cli    |
+| `http_deploy::HttpDeploy` | `http.deploy` | control plane                      | runner-http   |
+| `run_event::RunEvent`     | `run.events`  | runners                            | control plane |
 
 - **`Publisher<M>::publish(&M)`**: create one `KafkaProducer` per process and build every publisher from it, so they share one connection.
 - **`Subscriber<M>`**: `recv()` returns a `Delivery<M>` whose `message` is `Result<M, BusError>`, so a poison message can still be committed and skipped. `commit(&delivery)` marks it processed (at-least-once). Each subscriber joins the consumer group on its kind's topic. Its constructors are per kind, so name the kind: `Subscriber::<CliRun>::kafka(..)`.
@@ -43,10 +43,10 @@ Each message kind has its own file in `bus/messages/`. That file holds the struc
 
 `ObjectStorage<O>` is a handle to one bucket holding objects of kind `O`. Each kind is a marker struct, and its operations are implemented in an `impl ObjectStorage<Kind>` block that takes that kind's own key and contents types. Validation and byte encoding happen inside those methods:
 
-| Kind | Key → path | Contents | Validation / encoding |
-|------|-----------|----------|-----------------------|
-| `objects::artifact::Artifact` | `ArtifactKey` → `apps/<app>/<version>/component.wasm` | `Bytes` | must start with the wasm component header |
-| `objects::logs::CliLogChunk` | `CliLogKey` → `cli/<app>/<run>/<seq>.log.gz` | `[LogLine]` | non-empty; gzip NDJSON |
+| Kind                          | Key → path                                            | Contents    | Validation / encoding                     |
+| ----------------------------- | ----------------------------------------------------- | ----------- | ----------------------------------------- |
+| `objects::artifact::Artifact` | `ArtifactKey` → `apps/<app>/<version>/component.wasm` | `Bytes`     | must start with the wasm component header |
+| `objects::logs::CliLogChunk`  | `CliLogKey` → `cli/<app>/<run>/<seq>.log.gz`          | `[LogLine]` | non-empty; gzip NDJSON                    |
 
 Only the constructors (`s3`, `memory`) are generic. The raw string/bytes backend trait is crate-private, so no other crate can upload unvalidated bytes. To add a new kind, create the marker struct and key type, then write an `impl ObjectStorage<NewKind>` block in `common`. `ArtifactKey` (de)serializes as its path, so Kafka messages with a malformed key fail to decode.
 

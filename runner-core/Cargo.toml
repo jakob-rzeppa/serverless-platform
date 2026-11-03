@@ -1,0 +1,21 @@
+[package]
+name = "runner-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+bytes = "1.12.1"
+chrono = "0.4.45"
+common = { version = "0.1.0", path = "../common" }
+hex = "0.4.3"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt", "time", "fs"] }
+tracing = "0.1.44"
+uuid = { version = "1.29.0", features = ["v4"] }
+wasmtime = "50.0.1"
+wasmtime-wasi = "50.0.1"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,8 @@
+[package]
+name = "test-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Built for wasm32-wasip2 by runner-cli's tests; not part of the main workspace.
+[workspace]
