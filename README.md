@@ -1,6 +1,12 @@
 # Serverless Platform
 
-A aws-lambda like serverless platform that allows you to run wasm applications in a serverless environment.
+A Lambda-like platform for running WebAssembly components.
+
+- Users upload a WASM component and configure it (env vars, subdomain, schedule).
+- Two workload kinds:
+  - **CLI** (`wasi:cli`) – runs once to completion, either on demand or on a schedule.
+  - **HTTP** (`wasi:http`) – long-lived, reachable via its own subdomain over HTTPS.
+- Execution is done by Wasmtime (see README).
 
 ## Runtime
 
