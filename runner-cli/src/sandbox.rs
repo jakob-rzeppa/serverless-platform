@@ -16,7 +16,6 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    /// Must be called inside a Tokio runtime (spawns the epoch ticker).
     pub fn new() -> anyhow::Result<Self> {
         let runtime = Runtime::new()?;
         let mut linker = Linker::new(runtime.engine());

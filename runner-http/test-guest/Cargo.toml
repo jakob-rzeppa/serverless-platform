@@ -1,0 +1,11 @@
+[package]
+name = "test-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Built for wasm32-wasip2 by runner-http's tests; not part of the main workspace.
+[workspace]
+
+[dependencies]
+wstd = "0.6.8"

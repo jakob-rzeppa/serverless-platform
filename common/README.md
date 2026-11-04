@@ -31,7 +31,7 @@ Each message kind has its own file in `bus/messages/`. That file holds the struc
 | Kind                      | Topic         | Published by                       | Consumed by   |
 | ------------------------- | ------------- | ---------------------------------- | ------------- |
 | `cli_run::CliRun`         | `cli.run`     | control plane (manual + scheduler) | runner-cli    |
-| `http_deploy::HttpDeploy` | `http.deploy` | control plane                      | runner-http   |
+| `http_deploy::HttpDeploy` | `http.deploy` | control plane                      | runner-http (every replica; own group, replayed from the start) |
 | `run_event::RunEvent`     | `run.events`  | runners                            | control plane |
 
 - **`Publisher<M>::publish(&M)`**: create one `KafkaProducer` per process and build every publisher from it, so they share one connection.
@@ -47,6 +47,7 @@ Each message kind has its own file in `bus/messages/`. That file holds the struc
 | ----------------------------- | ----------------------------------------------------- | ----------- | ----------------------------------------- |
 | `objects::artifact::Artifact` | `ArtifactKey` → `apps/<app>/<version>/component.wasm` | `Bytes`     | must start with the wasm component header |
 | `objects::logs::CliLogChunk`  | `CliLogKey` → `cli/<app>/<run>/<seq>.log.gz`          | `[LogLine]` | non-empty; gzip NDJSON                    |
+| `objects::logs::HttpLogChunk` | `HttpLogKey` → `http/<app>/<yyyy-mm-dd>/<hh>/<writer>-<seq>.log.gz` | `[LogLine]` | non-empty, valid writer (`[A-Za-z0-9._-]`); gzip NDJSON |
 
 Only the constructors (`s3`, `memory`) are generic. The raw string/bytes backend trait is crate-private, so no other crate can upload unvalidated bytes. To add a new kind, create the marker struct and key type, then write an `impl ObjectStorage<NewKind>` block in `common`. `ArtifactKey` (de)serializes as its path, so Kafka messages with a malformed key fail to decode.
 

@@ -1,4 +1,10 @@
 //! `http.deploy`: desired-state change for an HTTP app.
+//!
+//! Every runner-http replica serves every app, so each replica consumes the
+//! whole topic (its own consumer group, from the earliest offset) to rebuild
+//! the current state. The topic should be log-compacted by `app_id`.
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -12,16 +18,22 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HttpDeploy {
+    /// Serve `artifact_key` at `<subdomain>.<apps domain>`, replacing any
+    /// earlier version of the app (and its old subdomain).
     Deploy {
         app_id: Uuid,
         version_id: Uuid,
+        /// One DNS label (`[a-z0-9-]`, at most 63 characters).
         subdomain: String,
         artifact_key: ArtifactKey,
+        /// Lowercase hex sha256 of the component; verified by the runner.
         sha256: String,
+        /// Plain env vars for every request's instance.
+        #[serde(default)]
+        env: BTreeMap<String, String>,
     },
-    Remove {
-        app_id: Uuid,
-    },
+    /// Stop serving the app.
+    Remove { app_id: Uuid },
 }
 
 impl HttpDeploy {

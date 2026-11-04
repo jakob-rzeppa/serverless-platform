@@ -1,0 +1,30 @@
+[package]
+name = "runner-http"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+bytes = "1.12.1"
+chrono = "0.4.45"
+common = { version = "0.1.0", path = "../common" }
+http = "1.5.0"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", features = ["http1", "server", "server-graceful", "tokio"] }
+runner-core = { version = "0.1.0", path = "../runner-core" }
+tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.29.0", features = ["v4"] }
+wasmtime = "50.0.1"
+wasmtime-wasi = "50.0.1"
+# No `default-send-request`: outgoing requests go through our hook, which denies them.
+wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p2"] }
+
+[dev-dependencies]
+common = { path = "../common", features = ["mock"] }
+hyper = { version = "1.12.0", features = ["client", "http1"] }
+tempfile = "3.27.0"

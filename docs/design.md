@@ -83,7 +83,7 @@ Why Garage: artifacts are small, immutable, written rarely and read on cold star
 Guest stdout/stderr is captured by the runners and written to the object store, in a separate `logs` bucket (so retention and access keys can differ from artifacts).
 
 - **CLI runs**: `runner-cli` buffers stdout/stderr (to a local temp file, not memory) and uploads it in numbered chunks every N seconds / M MB and once more when the run ends, before publishing the `finished`/`failed` event. Key: `cli/<app_id>/<run_id>/<seq>.log.gz`; a short run is a single chunk. Chunking makes logs visible while a long run is in progress and limits loss if the pod dies. The prefix is derived from `run_id`, so Postgres needs no extra column.
-- **HTTP apps**: `runner-http` batches output per app and flushes a chunk every N seconds or M MB: `http/<app_id>/<yyyy-mm-dd>/<hh>/<pod>-<seq>.log.gz`. Time-prefixed keys let the API list a time range cheaply.
+- **HTTP apps**: `runner-http` batches output per app and flushes a chunk every N seconds or M MB: `http/<app_id>/<yyyy-mm-dd>/<hh>/<writer>-<seq>.log.gz`, where `writer` is `<pod>.<random>`, unique per process start, so a restarted container never overwrites its earlier chunks. Time-prefixed keys let the API list a time range cheaply. A request's output is attached to the app's buffer when the request ends, tagged with its `request_id`.
 - **Format**: newline-delimited JSON (`ts`, `stream`, `line`, plus `request_id` for HTTP), gzip-compressed per object.
 - **Limits**: per-run / per-app-per-hour byte caps; output beyond the cap is dropped with a truncation marker, so a noisy guest cannot fill the store.
 - **Retention**: expire objects after a configurable period (e.g. 30 days), via a bucket lifecycle rule if supported, otherwise a periodic cleanup task in the control plane.
@@ -114,7 +114,7 @@ Two separate Rust binaries, each built into its **own container image** and depl
 Why separate images: the two workloads have different dependencies (`wasmtime-wasi-http` + an HTTP server vs. a plain Kafka consumer), different scaling signals (RPS vs. consumer lag), and different security surfaces (`runner-http` receives internet traffic, `runner-cli` does not). Separate images keep each one smaller, let them be released and rolled back independently, and keep HTTP-serving code out of the CLI image.
 
 - **`runner-cli`**: consumer group on `cli.run`. For each message: fetch/cached component → new `Store` with WASI context (env, limits) → call `wasi:cli/run` → emit result to `run.events`. Commit offset only after the run finishes (or after a hard timeout). Fresh instance per run for isolation; enforce fuel/epoch timeout, memory limit, no ambient filesystem/network unless granted.
-- **`runner-http`**: subscribes to `http.deploy`. For each app assigned to it, loads the component and serves it with `wasmtime-wasi-http`, creating a fresh instance per request (cheap with pre-instantiation – `InstancePre`).
+- **`runner-http`**: subscribes to `http.deploy` with its own consumer group per process start, replaying the topic from the earliest offset, because every replica serves every app. For each app it loads the component and serves it with `wasmtime-wasi-http`, creating a fresh instance per request (cheap with pre-instantiation – `InstancePre`). A failed deploy keeps the previous version serving. Outgoing HTTP from guests is denied. See `runner-http/README.md`.
 
 ### Edge / Gateway
 
@@ -211,7 +211,7 @@ sequenceDiagram
 ## Routing HTTP Requests to the Right App
 
 **Shared runner pool (for the start)**
-All HTTP runners can serve any app. The runner reads the `Host` header, looks up the app in its in-memory table (populated from `http.deploy`), loads/instantiates lazily. The gateway has one wildcard `HTTPRoute` → one Service. Adding an app needs no Kubernetes changes.
+All HTTP runners can serve any app. The runner reads the `Host` header and looks up the app in its in-memory table. The table is populated from `http.deploy`, and each component is compiled and pre-instantiated when its deploy message arrives, so the first request pays no compile cost. The gateway has one wildcard `HTTPRoute` → one Service. Adding an app needs no Kubernetes changes.
 
 > Later change to for example a hash-based routing scheme.
 

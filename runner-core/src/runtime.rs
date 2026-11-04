@@ -5,14 +5,24 @@
 //! wall-clock timeout, no filesystem preopens, no network (wasmtime-wasi
 //! denies sockets by default).
 //!
-//! Timeouts use epoch interruption: a background task increments the engine's
-//! epoch every [`EPOCH_TICK`], and each store traps once its deadline (in
-//! ticks) has passed.
+//! Timeouts use epoch interruption: a background thread increments the
+//! engine's epoch every [`EPOCH_TICK`]. On every tick a running guest yields
+//! to the async executor (so a CPU-bound guest cannot monopolize a Tokio
+//! worker), and once its deadline (in ticks) has passed it traps.
+//!
+//! The ticker is an OS thread, not a Tokio task: a task could be queued on
+//! the very worker a spinning guest occupies and then never run, so the
+//! deadline would never arrive.
 
-use std::{future::Future, time::Duration};
+use std::{
+    future::Future,
+    sync::mpsc::{self, RecvTimeoutError},
+    time::Duration,
+};
 
 use wasmtime::{
-    Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Trap, component::ResourceTable,
+    Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Trap, UpdateDeadline,
+    component::ResourceTable,
 };
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
@@ -31,7 +41,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Must be called inside a Tokio runtime (spawns the epoch ticker).
+    /// Starts the epoch ticker thread; it stops when the runtime is dropped.
     pub fn new() -> wasmtime::Result<Self> {
         let mut config = Config::new();
         config.epoch_interruption(true);
@@ -45,8 +55,10 @@ impl Runtime {
     }
 
     /// Fresh store with the memory limiter installed and an epoch deadline of
-    /// `timeout`, after which the guest traps. Run the guest with
-    /// [`run_guest`] so that trap is reported as [`GuestError::Timeout`].
+    /// `timeout`, after which the guest traps. The guest yields to the
+    /// executor on every epoch tick until then, so it must be called through
+    /// wasmtime's `*_async` methods. Run the guest with [`run_guest`] so the
+    /// trap is reported as [`GuestError::Timeout`].
     pub fn new_store<T: HasHostState + Send + 'static>(
         &self,
         data: T,
@@ -54,8 +66,16 @@ impl Runtime {
     ) -> Store<T> {
         let mut store = Store::new(&self.engine, data);
         store.limiter(|s| &mut s.host_state().limits);
-        store.set_epoch_deadline(deadline_ticks(timeout));
-        store.epoch_deadline_trap();
+        let mut remaining = deadline_ticks(timeout);
+        store.set_epoch_deadline(1);
+        store.epoch_deadline_callback(move |_| {
+            remaining -= 1;
+            Ok(if remaining == 0 {
+                UpdateDeadline::Interrupt
+            } else {
+                UpdateDeadline::Yield(1)
+            })
+        });
         store
     }
 }
@@ -136,25 +156,23 @@ fn deadline_ticks(timeout: Duration) -> u64 {
     timeout.as_millis().div_ceil(EPOCH_TICK.as_millis()).max(1) as u64
 }
 
-/// Increments the engine's epoch every [`EPOCH_TICK`] until dropped.
-struct EpochTicker(tokio::task::JoinHandle<()>);
+/// Thread that increments the engine's epoch every [`EPOCH_TICK`] until
+/// dropped (dropping the sender wakes it and ends the loop).
+struct EpochTicker(#[allow(dead_code)] mpsc::Sender<()>);
 
 impl EpochTicker {
     fn start(engine: &Engine) -> Self {
         let engine = engine.clone();
-        Self(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(EPOCH_TICK);
-            loop {
-                interval.tick().await;
-                engine.increment_epoch();
-            }
-        }))
-    }
-}
-
-impl Drop for EpochTicker {
-    fn drop(&mut self) {
-        self.0.abort();
+        let (stop, ticks) = mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("epoch-ticker".into())
+            .spawn(move || {
+                while let Err(RecvTimeoutError::Timeout) = ticks.recv_timeout(EPOCH_TICK) {
+                    engine.increment_epoch();
+                }
+            })
+            .expect("spawn epoch ticker thread");
+        Self(stop)
     }
 }
 
