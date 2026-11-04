@@ -1,0 +1,9 @@
+# Build context is the repo root (the runners are workspace crates).
+**/target
+.git
+.DS_Store
+# Configuration comes from the container environment, never from baked-in files.
+**/.env
+**/.env.local
+docs
+deploy
