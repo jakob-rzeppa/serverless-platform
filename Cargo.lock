@@ -1922,24 +1922,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runner-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "common",
- "runner-core",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
 name = "runner-core"
 version = "0.1.0"
 dependencies = [

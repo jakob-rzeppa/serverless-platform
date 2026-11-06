@@ -1,7 +1,7 @@
 //! Wasmtime engine, per-instance stores and guest timeouts.
 //!
-//! Every invocation (CLI run or HTTP request) gets a fresh `Store`: no state
-//! is shared between invocations. Limits: linear memory cap, epoch-based
+//! Every invocation (HTTP request) gets a fresh `Store`: no state is shared
+//! between invocations. Limits: linear memory cap, epoch-based
 //! wall-clock timeout, no filesystem preopens, no network (wasmtime-wasi
 //! denies sockets by default).
 //!

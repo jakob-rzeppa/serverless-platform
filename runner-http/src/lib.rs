@@ -10,8 +10,8 @@
 //! - [`logs`]: per-request stdout/stderr, tagged with the request id,
 //!   batched per app and uploaded as `http/<app>/<date>/<hour>/…` chunks.
 //!
-//! runner-http publishes no Kafka messages. Wasmtime host pieces shared with
-//! runner-cli live in `runner_core`. The binary (`main.rs`) wires real
+//! runner-http publishes no Kafka messages. The Wasmtime host pieces live in
+//! `runner_core`. The binary (`main.rs`) wires real
 //! adapters (Kafka, S3); tests wire the mocks from `common` (feature `mock`).
 
 pub mod apps;

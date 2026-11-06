@@ -1,5 +1,4 @@
-//! `runner-core`: the Wasmtime host pieces shared by `runner-cli` and
-//! `runner-http`.
+//! `runner-core`: the Wasmtime host pieces used by `runner-http`.
 //!
 //! - [`Runtime`]: engine + epoch ticker; makes per-instance stores with a
 //!   memory cap and deadline. [`run_guest`] awaits a guest and reports
@@ -8,8 +7,8 @@
 //!   `Component`.
 //! - [`CapturePipe`]: capped stdout/stderr capture, drained as log lines.
 //!
-//! Anything tied to one export (`wasi:cli/run`, `wasi:http/incoming-handler`),
-//! to a Kafka topic or to a log key layout stays in the runner crates.
+//! Anything tied to an export (`wasi:http/incoming-handler`), to a Kafka
+//! topic or to a log key layout stays in the runner crate.
 
 mod artifacts;
 mod capture;

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["common", "runner-core", "runner-cli", "runner-http"]
+members = ["common", "runner-core", "runner-http"]
 exclude = ["examples"]
 
 [workspace.package]

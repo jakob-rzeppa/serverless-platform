@@ -1,7 +1,7 @@
-# Local stack: Kafka + Garage + both runners.
+# Local stack: Kafka + Garage + runner-http.
 #
 #   docker compose up -d --build        # everything
-#   docker compose up -d kafka garage   # only infrastructure, run the runners with `cargo run`
+#   docker compose up -d kafka garage   # only infrastructure, run runner-http with `cargo run`
 #
 # From the host: Kafka at localhost:9092, Garage S3 at http://localhost:3900,
 # runner-http at http://<subdomain>.apps.localhost:8080. The dev S3 key below
@@ -66,8 +66,6 @@ services:
         set -euo pipefail
         topics=/opt/kafka/bin/kafka-topics.sh
         create() { "$$topics" --bootstrap-server kafka:29092 --create --if-not-exists --replication-factor 1 "$$@"; }
-        create --topic cli.run --partitions 3
-        create --topic run.events --partitions 3
         # Desired state: compacted, so a starting runner-http replays one message per app.
         create --topic http.deploy --partitions 3 --config cleanup.policy=compact
         "$$topics" --bootstrap-server kafka:29092 --list
@@ -108,20 +106,6 @@ services:
     environment: *dev-s3
     entrypoint: ["/bin/sh", "/garage-init.sh"]
 
-  runner-cli:
-    <<: *runner
-    build:
-      context: .
-      dockerfile: runner-cli/Dockerfile
-    image: serverless-platform/runner-cli:dev
-    environment:
-      <<: *dev-s3
-      KAFKA_BROKERS: kafka:29092
-      KAFKA_GROUP_ID: runner-cli
-      RUST_LOG: info,librdkafka=warn
-    volumes:
-      - runner-cli-cache:/var/cache/runner-cli
-
   runner-http:
     <<: *runner
     build:
@@ -142,5 +126,4 @@ services:
 volumes:
   garage-meta:
   garage-data:
-  runner-cli-cache:
   runner-http-cache:

@@ -2,7 +2,7 @@
 //!
 //! Storage is typed: [`ObjectStorage<O>`] is a handle to one bucket holding
 //! objects of kind `O` (a marker type such as [`objects::artifact::Artifact`] or
-//! [`objects::logs::CliLogChunk`]). The operations are implemented per kind in
+//! [`objects::logs::HttpLogChunk`]). The operations are implemented per kind in
 //! `impl ObjectStorage<Kind>` blocks (see [`objects`]), each taking that
 //! kind's key and contents types and validating / encoding them, so only
 //! well-formed keys and valid contents can be uploaded. The raw string/bytes
@@ -77,7 +77,7 @@ mod tests {
         backend::memory::MemoryStorage,
         objects::{
             artifact::{Artifact, ArtifactKey},
-            logs::{CliLogChunk, CliLogKey, CliLogPrefix},
+            logs::{HttpLogChunk, HttpLogKey, HttpLogPrefix},
         },
         *,
     };
@@ -87,14 +87,14 @@ mod tests {
     async fn rejects_invalid_contents_without_writing() {
         let raw = MemoryStorage::new();
         let artifacts = ObjectStorage::<Artifact>::memory(&raw);
-        let logs = ObjectStorage::<CliLogChunk>::memory(&raw);
+        let logs = ObjectStorage::<HttpLogChunk>::memory(&raw);
         let key = ArtifactKey {
             app_id: Uuid::new_v4(),
             version_id: Uuid::new_v4(),
         };
-        let log_key = CliLogKey {
-            app_id: key.app_id,
-            run_id: Uuid::new_v4(),
+        let log_key = HttpLogKey {
+            prefix: HttpLogPrefix::new(key.app_id, chrono::Utc::now()),
+            writer: "pod-1".into(),
             seq: 0,
         };
 
@@ -113,21 +113,18 @@ mod tests {
     #[tokio::test]
     async fn typed_put_get_list_delete() {
         let raw = MemoryStorage::new();
-        let logs = ObjectStorage::<CliLogChunk>::memory(&raw);
-        let prefix = CliLogPrefix {
-            app_id: Uuid::new_v4(),
-            run_id: Uuid::new_v4(),
-        };
-        let key = |seq| CliLogKey {
-            app_id: prefix.app_id,
-            run_id: prefix.run_id,
+        let logs = ObjectStorage::<HttpLogChunk>::memory(&raw);
+        let prefix = HttpLogPrefix::new(Uuid::new_v4(), chrono::Utc::now());
+        let key = |seq| HttpLogKey {
+            prefix,
+            writer: "pod-1".into(),
             seq,
         };
         let lines = vec![LogLine {
             ts: chrono::Utc::now(),
             stream: Stream::Stdout,
             line: "hi".into(),
-            request_id: None,
+            request_id: Some("r1".into()),
         }];
 
         logs.put(&key(1), &lines).await.unwrap();

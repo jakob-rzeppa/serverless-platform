@@ -1,7 +1,7 @@
 //! Message bus port (Kafka in production).
 //!
 //! The bus is typed: [`Publisher<M>`] and [`Subscriber<M>`] are handles for
-//! one message kind `M` (e.g. [`messages::cli_run::CliRun`]). Publishing,
+//! one message kind `M` (e.g. [`messages::http_deploy::HttpDeploy`]). Publishing,
 //! receiving and the subscriber constructors are implemented per kind in
 //! `impl Publisher<Kind>` / `impl Subscriber<Kind>` blocks (see [`messages`]),
 //! which fix the topic, partition key and encoding. The raw producer /
@@ -71,7 +71,7 @@ impl<M> Publisher<M> {
 /// group. Offsets are committed explicitly, only after a message has been
 /// fully processed (at-least-once).
 ///
-/// Constructors are per kind (`Subscriber::<CliRun>::kafka(..)`), because
+/// Constructors are per kind (`Subscriber::<HttpDeploy>::kafka(..)`), because
 /// they subscribe to that kind's topic.
 pub struct Subscriber<M> {
     backend: Arc<dyn ConsumerBackend>,

@@ -120,7 +120,7 @@ cargo test -p runner-http  # no external services: in-memory Kafka + S3 from com
 
 ## Configuration
 
-Shared variables come from `<root>/.env` (`KAFKA_BROKERS`, `S3_*`, `ARTIFACT_BUCKET`, `LOG_BUCKET`, `RUST_LOG`). Runner-specific variables come from `runner-http/.env`. `.env.local` overrides either file. Per-bucket S3 credentials work as in [runner-cli](../runner-cli/README.md#configuration): give runner-http a read-only artifacts key and a write-only logs key.
+Shared variables come from `<root>/.env` (`KAFKA_BROKERS`, `S3_*`, `ARTIFACT_BUCKET`, `LOG_BUCKET`, `RUST_LOG`). Runner-specific variables come from `runner-http/.env`. `.env.local` overrides either file. Each bucket gets its own S3 client. Credentials default to the shared `S3_ACCESS_KEY` / `S3_SECRET_KEY` and can be overridden per bucket with `ARTIFACT_S3_ACCESS_KEY` / `ARTIFACT_S3_SECRET_KEY` and `LOG_S3_ACCESS_KEY` / `LOG_S3_SECRET_KEY` (set both of a pair or neither). In production, give runner-http a read-only artifacts key and a write-only logs key.
 
 | Var                          | Default                   |                                                                                   |
 | ---------------------------- | ------------------------- | --------------------------------------------------------------------------------- |
@@ -146,7 +146,7 @@ Shared variables come from `<root>/.env` (`KAFKA_BROKERS`, `S3_*`, `ARTIFACT_BUC
 | `guest`  | store data (`GuestState` wraps runner-core's `HostState` + `WasiHttpCtx`), linker, outgoing-request denial |
 | `logs`   | `LogBook`: per-app buffering, hourly budget, chunk upload                                                  |
 
-Engine, store limits, timeouts, the artifact cache and output capture come from [`runner-core`](../runner-core/README.md), shared with runner-cli.
+Engine, store limits, timeouts, the artifact cache and output capture come from [`runner-core`](../runner-core/README.md).
 
 ## Tests
 

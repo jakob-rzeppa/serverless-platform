@@ -1,6 +1,6 @@
 # runner-core
 
-Wasmtime host library shared by `runner-cli` and `runner-http`. It knows nothing about Kafka topics, log key layouts or which export a component has; those stay in the runner crates.
+Wasmtime host library used by `runner-http`. It knows nothing about Kafka topics, log key layouts or which export a component has; those stay in the runner crate.
 
 - `Runtime`: Wasmtime engine with epoch interruption, plus a ticker **thread** that advances the epoch every 100 ms. It's a thread rather than a Tokio task because a task could be queued behind a spinning guest on the same worker and never run. `new_store(data, timeout)` makes a fresh store with the memory limiter and epoch deadline installed. The guest yields to the executor on every tick, so a CPU-bound guest doesn't monopolize a worker, and it traps once the deadline passes. Call guests through the `*_async` methods.
 - `HostState`: WASI context, resource table and memory cap for one instance.

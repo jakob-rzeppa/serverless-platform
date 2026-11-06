@@ -163,7 +163,7 @@ mod tests {
     use super::*;
     use crate::bus::{
         Publisher, Subscriber,
-        messages::{HTTP_DEPLOY, RUN_EVENTS, http_deploy::HttpDeploy},
+        messages::{HTTP_DEPLOY, http_deploy::HttpDeploy},
     };
 
     #[tokio::test]
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(bus.committed(HTTP_DEPLOY), Some(0));
         assert_eq!(bus.published::<HttpDeploy>(HTTP_DEPLOY), vec![msg]);
         assert_eq!(bus.pending(HTTP_DEPLOY), 0);
-        assert_eq!(bus.committed(RUN_EVENTS), None);
+        assert_eq!(bus.committed("other.topic"), None);
     }
 
     #[tokio::test]

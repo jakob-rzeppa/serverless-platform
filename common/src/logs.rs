@@ -1,5 +1,5 @@
 //! Log line types. Chunks of lines are stored as
-//! [`storage::objects::logs::CliLogChunk`](crate::storage::objects::logs::CliLogChunk),
+//! [`storage::objects::logs::HttpLogChunk`](crate::storage::objects::logs::HttpLogChunk),
 //! which owns the byte encoding.
 
 use chrono::{DateTime, Utc};
