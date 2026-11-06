@@ -21,9 +21,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = Config::from_env().context("invalid configuration")?;
-    // Unique per process start: a restarted container must neither share a
-    // consumer group (it has to replay every deploy) nor overwrite earlier
-    // log chunks.
+    // Unique per process start: a restarted container must not share a
+    // consumer group (it has to replay every deploy).
     let instance = format!(
         "{}.{}",
         cfg.pod_name,
@@ -33,14 +32,12 @@ async fn main() -> anyhow::Result<()> {
     let deps = Deps {
         deploys: Subscriber::<HttpDeploy>::kafka(&cfg.kafka_brokers, &group_id)?,
         artifacts: ObjectStorage::s3(&cfg.artifacts)?,
-        logs: ObjectStorage::s3(&cfg.logs)?,
         cache_dir: cfg.cache_dir.clone(),
     };
     let runner = Runner::new(
         deps,
         Settings {
             apps_domain: cfg.apps_domain.clone(),
-            instance: instance.clone(),
             limits: cfg.limits.clone(),
         },
     )?;

@@ -22,7 +22,7 @@
                           │     │ ┌───────┐     │        │
                           │     │ │ Kafka │─────┘        │
                           │     │ └───────┘              │
-                          │     │                        │ wasm, logs
+                          │     │                        │ wasm
                           │     ▼                        │
                           │  ┌────────────────────┐      │
                           │  │ Object store       │◀─────┘
@@ -48,7 +48,6 @@ Responsibilities:
 - Validate the component on upload (is it a valid component, does it export `wasi:http/incoming-handler`?).
 - Publish **commands** to Kafka (`deploy`, `undeploy`).
 - AuthN/AuthZ (API tokens initially).
-- Expose app logs (read from the object store and streamed to the client).
 
 Stateless; scale horizontally.
 
@@ -61,22 +60,12 @@ Serves the dashboard UI at `web.<domain>`. Separate deployment from the control 
 
 ### Object Storage
 
-[Garage](https://garagehq.deuxfleurs.fr/) in-cluster (S3-compatible, Rust, single binary, built-in multi-node replication). Stores immutable WASM artifacts and logs. Code talks only to the generic S3 API (e.g. `object_store` / `aws-sdk-s3` crates), so swapping to SeaweedFS or real S3 later requires no code changes.
+[Garage](https://garagehq.deuxfleurs.fr/) in-cluster (S3-compatible, Rust, single binary, built-in multi-node replication). Stores immutable WASM artifacts. Code talks only to the generic S3 API (e.g. `object_store` / `aws-sdk-s3` crates), so swapping to SeaweedFS or real S3 later requires no code changes.
 
 Why Garage: artifacts are small, immutable, written rarely and read on cold start (then cached), so only basic PUT/GET/multipart is needed. Garage covers that with minimal operational overhead.
 
 - Key layout: `apps/<app_id>/<version_id>/component.wasm`.
 - Runners fetch on demand and cache on local disk keyed by sha256 (immutable, so caching is trivially safe).
-
-#### Logs
-
-Guest stdout/stderr is captured by `runner-http` and written to the object store, in a separate `logs` bucket (so retention and access keys can differ from artifacts).
-
-- **Chunks**: `runner-http` batches output per app and flushes a chunk every N seconds or M MB: `http/<app_id>/<yyyy-mm-dd>/<hh>/<writer>-<seq>.log.gz`, where `writer` is `<pod>.<random>`, unique per process start, so a restarted container never overwrites its earlier chunks. Time-prefixed keys let the API list a time range cheaply. A request's output is attached to the app's buffer when the request ends, tagged with its `request_id`.
-- **Format**: newline-delimited JSON (`ts`, `stream`, `line`, `request_id`), gzip-compressed per object.
-- **Limits**: per-request / per-app-per-hour byte caps; output beyond the cap is dropped with a truncation marker, so a noisy guest cannot fill the store.
-- **Retention**: expire objects after a configurable period (e.g. 30 days), via a bucket lifecycle rule if supported, otherwise a periodic cleanup task in the control plane.
-- **Reading**: only the control plane reads logs (`GET /apps/:id/logs?from=&to=`); runners have write-only credentials to the `logs` bucket.
 
 ### Postgres
 
@@ -152,7 +141,7 @@ All HTTP runners can serve any app. The runner reads the `Host` header and looks
 
 - **Sandboxing**: Wasmtime limits (memory, table, instances), epoch interruption for timeouts, fuel optionally; capability-based WASI (deny network/fs by default). Runner pods run non-root, read-only rootfs, with NetworkPolicies restricting egress (e.g. block cluster-internal ranges and cloud metadata endpoint).
 - **Secrets**: env values marked secret are encrypted at rest in Postgres (or referenced from k8s Secrets) and only resolved when building the WASI context.
-- **Observability**: guest stdout/stderr stored in the object store (see Object Storage → Logs); Prometheus metrics (runs, durations, request latency, cold start, Kafka lag); tracing with OpenTelemetry.
+- **Observability**: guest stdout/stderr is discarded for now (app logging is on the roadmap, see `README.md`); Prometheus metrics (runs, durations, request latency, cold start, Kafka lag); tracing with OpenTelemetry.
 - **Scaling**: HTTP runners autoscale on CPU/RPS (HPA).
 - **Failure handling**: dead-letter topic for poison messages.
 - **Versioning/rollback**: versions are immutable; deploy = pointer move; rollback = move it back.
@@ -163,7 +152,7 @@ All HTTP runners can serve any app. The runner reads the `Host` header and looks
 
 `common` uses the adapter pattern: services depend on traits, and the concrete adapter is injected at startup.
 
-- **Object store**: typed `storage::ObjectStorage<O>` (one handle per bucket). Operations are implemented per object kind (`impl ObjectStorage<Artifact>`, `impl ObjectStorage<HttpLogChunk>`), each taking that kind's key and contents types and validating/encoding them (`Artifact` must be a wasm component, `HttpLogChunk` is gzip NDJSON), so only valid objects are uploaded. Real adapter via `ObjectStorage::s3` (`object_store` crate, path-style for Garage); mock via `ObjectStorage::memory(&MemoryStorage)`.
+- **Object store**: typed `storage::ObjectStorage<O>` (one handle per bucket). Operations are implemented per object kind (e.g. `impl ObjectStorage<Artifact>`), each taking that kind's key and contents types and validating/encoding them (`Artifact` must be a wasm component), so only valid objects are uploaded. Real adapter via `ObjectStorage::s3` (`object_store` crate, path-style for Garage); mock via `ObjectStorage::memory(&MemoryStorage)`.
 - **Kafka**: typed `bus::Publisher<M>` / `bus::Subscriber<M>` per message kind (currently `HttpDeploy`); topic, key and encoding are fixed per kind, and commits are explicit. Real adapter rdkafka (one shared producer connection); mock `MemoryBus` (single consumer group, inspectable published messages and committed offsets).
 - Mocks are behind `common`'s `mock` feature, enabled only from `[dev-dependencies]`, so they never end up in release binaries.
 - **Postgres**: not mocked. Use `sqlx` with `#[sqlx::test]`, which creates a fresh database per test on a real Postgres.
@@ -173,7 +162,7 @@ All HTTP runners can serve any app. The runner reads the `Host` header and looks
 
 - `postgres` – plain image.
 - Kafka – `apache/kafka` single node in KRaft mode (no ZooKeeper). An init step creates `http.deploy` (compacted).
-- Garage – `dxflrs/garage` single node (replication factor 1); an init script assigns/applies the layout and creates the `apps` and `logs` buckets plus a dev access key.
+- Garage – `dxflrs/garage` single node (replication factor 1); an init script assigns/applies the layout and creates the `apps` bucket plus a dev access key.
 - No gateway: `runner-http` listens on `:8080` and routes by `Host`. `*.localhost` resolves to `127.0.0.1` in browsers and curl, so `http://hello.apps.localhost:8080` works without DNS or TLS. Control plane on `:3000`, web dev server on `:5173` (allowed via CORS).
 - Configuration from env vars, loaded by `common::env::load_dotenv`. Shared values (`KAFKA_BROKERS`, `S3_*`, buckets) live in `<root>/.env`, service-specific values in `<service>/.env`, and a gitignored `.env.local` next to each overrides it. Real process env always wins.
 - `justfile` targets: `dev-up` / `dev-down` (compose), `build-examples` (`cargo build --target wasm32-wasip2`), `deploy-example` (upload + deploy via the API).
@@ -184,9 +173,9 @@ Cargo workspace:
 
 ```
 control-plane/   # HTTP API
-runner-core/     # shared wasmtime host lib (engine, sandbox limits, WASI ctx, artifact cache, output capture)
+runner-core/     # shared wasmtime host lib (engine, sandbox limits, WASI ctx, artifact cache)
 runner-http/     # binary + image: wasi:http server, Host-based routing
-common/          # Kafka message schemas, bus + storage adapters (+ mocks), log format, env loading
+common/          # Kafka message schemas, bus + storage adapters (+ mocks), env loading
 web/               # dashboard UI (web server)
 examples/          # sample wasm apps
 deploy/            # Helm chart / kustomize manifests

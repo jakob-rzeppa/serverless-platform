@@ -82,7 +82,7 @@ impl Runtime {
 
 /// WASI context, resource table and memory limits of one instance.
 pub struct HostState {
-    /// WASI context (env, stdio) exposed to the guest.
+    /// WASI context (env) exposed to the guest.
     pub ctx: WasiCtx,
     /// Resource handles owned by the guest.
     pub table: ResourceTable,

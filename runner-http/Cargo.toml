@@ -7,7 +7,6 @@ license.workspace = true
 [dependencies]
 anyhow = "1.0.104"
 bytes = "1.12.1"
-chrono = "0.4.45"
 common = { version = "0.1.0", path = "../common" }
 http = "1.5.0"
 http-body-util = "0.1.5"

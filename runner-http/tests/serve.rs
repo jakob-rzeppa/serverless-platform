@@ -1,12 +1,12 @@
 //! End-to-end tests: the runner serves a real TCP listener and consumes
-//! `http.deploy` from the in-memory Kafka (`MemoryBus`), with artifacts and
-//! logs in the in-memory object store (`MemoryStorage`) from `common`
-//! (feature `mock`, enabled in [dev-dependencies]).
+//! `http.deploy` from the in-memory Kafka (`MemoryBus`), with artifacts in
+//! the in-memory object store (`MemoryStorage`) from `common` (feature
+//! `mock`, enabled in [dev-dependencies]).
 //!
 //! Each test acts like the control plane plus a client: it uploads the
 //! component through the typed artifact store, publishes `http.deploy`
-//! messages, sends HTTP requests by `Host` and checks responses, log chunks
-//! and committed offsets.
+//! messages, sends HTTP requests by `Host` and checks responses and committed
+//! offsets.
 
 use std::{
     net::SocketAddr,
@@ -20,21 +20,16 @@ use std::{
 };
 
 use bytes::Bytes;
-use chrono::{TimeDelta, Utc};
 use common::{
     bus::{
         Publisher, Subscriber,
         backend::memory::MemoryBus,
         messages::{HTTP_DEPLOY, http_deploy::HttpDeploy},
     },
-    logs::{LogLine, Stream},
     storage::{
         ObjectStorage,
         backend::memory::MemoryStorage,
-        objects::{
-            artifact::{Artifact, ArtifactKey},
-            logs::{HttpLogChunk, HttpLogKey, HttpLogPrefix},
-        },
+        objects::artifact::{Artifact, ArtifactKey},
     },
 };
 use http_body_util::{BodyExt, Full};
@@ -46,7 +41,6 @@ use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
 
 const DOMAIN: &str = "apps.test";
-const WRITER: &str = "test-pod.0001";
 const WAIT: Duration = Duration::from_secs(60);
 
 /// Build `test-guest` for wasm32-wasip2 once per test binary.
@@ -90,7 +84,6 @@ struct Harness {
     artifacts: ObjectStorage<Artifact>,
     /// Raw artifacts bucket, to plant objects that fail validation.
     raw_artifacts: MemoryStorage,
-    logs: ObjectStorage<HttpLogChunk>,
     addr: SocketAddr,
     _cache: tempfile::TempDir,
     shutdown: Option<oneshot::Sender<()>>,
@@ -105,22 +98,16 @@ impl Harness {
     async fn with_limits(limits: Limits) -> Self {
         let bus = MemoryBus::new();
         let raw_artifacts = MemoryStorage::new();
-        let logs = ObjectStorage::memory(&MemoryStorage::new());
         let cache = tempfile::tempdir().unwrap();
         let runner = Runner::new(
             Deps {
                 deploys: Subscriber::<HttpDeploy>::memory(&bus),
                 artifacts: ObjectStorage::memory(&raw_artifacts),
-                logs: logs.clone(),
                 cache_dir: cache.path().to_path_buf(),
             },
             Settings {
                 apps_domain: DOMAIN.into(),
-                instance: WRITER.into(),
-                limits: Limits {
-                    log_flush_interval: Duration::from_millis(50),
-                    ..limits
-                },
+                limits,
             },
         )
         .unwrap();
@@ -136,7 +123,6 @@ impl Harness {
             artifacts: ObjectStorage::memory(&raw_artifacts),
             bus,
             raw_artifacts,
-            logs,
             addr,
             _cache: cache,
             shutdown: Some(shutdown),
@@ -198,32 +184,7 @@ impl Harness {
         self.request(Method::GET, host, path, "").await
     }
 
-    /// Every uploaded log line of `app_id` (this and the previous hour), in
-    /// upload order, with the keys they came from.
-    async fn log_chunks(&self, app_id: Uuid) -> Vec<(HttpLogKey, Vec<LogLine>)> {
-        let now = Utc::now();
-        let mut chunks = Vec::new();
-        for at in [now - TimeDelta::hours(1), now] {
-            let prefix = HttpLogPrefix::new(app_id, at);
-            for key in self.logs.list_log_chunks(&prefix).await.unwrap() {
-                let lines = self.logs.get(&key).await.unwrap();
-                chunks.push((key, lines));
-            }
-        }
-        chunks.sort_by_key(|(k, _)| (k.prefix.hour, k.seq));
-        chunks
-    }
-
-    async fn logs(&self, app_id: Uuid) -> Vec<LogLine> {
-        self.log_chunks(app_id)
-            .await
-            .into_iter()
-            .flat_map(|(_, lines)| lines)
-            .collect()
-    }
-
     /// Request shutdown (like SIGTERM) and wait for the runner to return.
-    /// All logs are uploaded afterwards.
     async fn stop(&mut self) {
         let _ = self.shutdown.take().unwrap().send(());
         tokio::time::timeout(WAIT, self.runner.take().unwrap())
@@ -263,10 +224,6 @@ async fn send(addr: SocketAddr, method: Method, host: &str, path: &str, body: &s
 
 fn host(subdomain: &str) -> String {
     format!("{subdomain}.{DOMAIN}")
-}
-
-fn texts(lines: &[LogLine]) -> Vec<(Stream, &str)> {
-    lines.iter().map(|l| (l.stream, l.line.as_str())).collect()
 }
 
 // --- routing -----------------------------------------------------------------
@@ -484,9 +441,9 @@ async fn outgoing_requests_are_denied() {
 // --- guest failures ------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn panic_and_handler_error_are_500_and_logged() {
-    let mut h = Harness::start().await;
-    let app = h.deploy("fail", &[]).await;
+async fn panic_and_handler_error_are_500() {
+    let h = Harness::start().await;
+    h.deploy("fail", &[]).await;
 
     let panicked = h.get(&host("fail"), "/panic").await;
     assert_eq!(panicked.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -495,31 +452,6 @@ async fn panic_and_handler_error_are_500_and_logged() {
     assert_eq!(errored.status, StatusCode::INTERNAL_SERVER_ERROR);
     // A failed request does not affect the next one.
     assert_eq!(h.get(&host("fail"), "/env/X").await.status, StatusCode::OK);
-
-    h.stop().await;
-    let logs = h.logs(app).await;
-    let of = |rid: &str| -> Vec<_> {
-        logs.iter()
-            .filter(|l| l.request_id.as_deref() == Some(rid))
-            .collect()
-    };
-    let panic_logs = of(panicked.request_id());
-    assert!(
-        panic_logs
-            .iter()
-            .any(|l| l.stream == Stream::Stderr && l.line.contains("boom"))
-    );
-    assert!(
-        panic_logs
-            .iter()
-            .any(|l| l.stream == Stream::System && l.line.starts_with("request failed"))
-    );
-    assert!(
-        of(errored.request_id())
-            .iter()
-            .any(|l| l.stream == Stream::System),
-        "{logs:?}"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -547,97 +479,6 @@ async fn memory_limit_fails_the_request() {
     assert_eq!(
         h.get(&host("mem"), "/alloc/64").await.status,
         StatusCode::INTERNAL_SERVER_ERROR
-    );
-}
-
-// --- logs ----------------------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread")]
-async fn logs_are_tagged_with_the_request_id() {
-    let mut h = Harness::start().await;
-    let app = h.deploy("logs", &[]).await;
-    let r = h.get(&host("logs"), "/log").await;
-    assert_eq!(r.body, "logged");
-
-    h.stop().await;
-    let chunks = h.log_chunks(app).await;
-    let (key, lines) = &chunks[0];
-    assert_eq!(key.writer, WRITER);
-    assert_eq!(
-        key.path(),
-        format!(
-            "http/{app}/{}/{WRITER}-000000.log.gz",
-            key.prefix.hour.format("%Y-%m-%d/%H")
-        )
-    );
-    assert_eq!(
-        texts(lines),
-        [(Stream::Stdout, "out line"), (Stream::Stderr, "err line")]
-    );
-    assert!(
-        lines
-            .iter()
-            .all(|l| l.request_id.as_deref() == Some(r.request_id()))
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn logs_are_uploaded_while_serving() {
-    let h = Harness::start().await; // flushes every 50 ms
-    let app = h.deploy("live", &[]).await;
-    h.get(&host("live"), "/log").await;
-    tokio::time::timeout(WAIT, async {
-        while h.logs(app).await.len() < 2 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("logs were not uploaded before shutdown");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn request_output_beyond_the_cap_is_dropped_with_a_marker() {
-    let mut h = Harness::with_limits(Limits {
-        log_request_max_bytes: 90,
-        ..Limits::default()
-    })
-    .await;
-    let app = h.deploy("noisy", &[]).await;
-    h.get(&host("noisy"), "/spam/9000").await;
-
-    h.stop().await;
-    let logs = h.logs(app).await;
-    let (marker, output) = logs.split_last().unwrap();
-    assert_eq!(texts(output), vec![(Stream::Stdout, "xxxxxxxx"); 10]);
-    assert_eq!(
-        (marker.stream, marker.line.as_str()),
-        (Stream::System, "[stdout truncated: output limit reached]")
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn hourly_log_budget_drops_further_output() {
-    let mut h = Harness::with_limits(Limits {
-        log_app_max_bytes_per_hour: 10,
-        ..Limits::default()
-    })
-    .await;
-    let app = h.deploy("budget", &[]).await;
-    h.get(&host("budget"), "/log").await; // "out line" (8 bytes) fits, "err line" does not
-    h.get(&host("budget"), "/log").await; // nothing fits any more
-
-    h.stop().await;
-    let logs = h.logs(app).await;
-    // (Assumes the test does not straddle a UTC hour boundary.)
-    assert_eq!(
-        texts(&logs),
-        [
-            (Stream::Stdout, "out line"),
-            (
-                Stream::System,
-                "[log limit for this hour reached: further output dropped]"
-            ),
-        ]
     );
 }
 

@@ -15,7 +15,6 @@ x-dev-s3: &dev-s3
   S3_ACCESS_KEY: GK0123456789abcdef01234567
   S3_SECRET_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   ARTIFACT_BUCKET: apps
-  LOG_BUCKET: logs
 
 x-runner: &runner
   restart: unless-stopped

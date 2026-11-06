@@ -1,6 +1,6 @@
 # common
 
-Shared code for the platform services: a typed message bus (Kafka message kinds), typed object storage (key layout + validated encoding), log line types, and `.env` loading.
+Shared code for the platform services: a typed message bus (Kafka message kinds), typed object storage (key layout + validated encoding), and `.env` loading.
 
 Services use typed handles. The concrete adapter is chosen at startup:
 
@@ -20,7 +20,6 @@ bus/                         storage/
   backend/ kafka, memory       backend/ s3, memory     (raw traits are private to the module)
   messages/                    objects/
     http_deploy.rs               artifact.rs
-                                 logs.rs
 ```
 
 ## Typed bus
@@ -43,17 +42,16 @@ Each message kind has its own file in `bus/messages/`. That file holds the struc
 | Kind                          | Key → path                                            | Contents    | Validation / encoding                     |
 | ----------------------------- | ----------------------------------------------------- | ----------- | ----------------------------------------- |
 | `objects::artifact::Artifact` | `ArtifactKey` → `apps/<app>/<version>/component.wasm` | `Bytes`     | must start with the wasm component header |
-| `objects::logs::HttpLogChunk` | `HttpLogKey` → `http/<app>/<yyyy-mm-dd>/<hh>/<writer>-<seq>.log.gz` | `[LogLine]` | non-empty, valid writer (`[A-Za-z0-9._-]`); gzip NDJSON |
 
 Only the constructors (`s3`, `memory`) are generic. The raw string/bytes backend trait is crate-private, so no other crate can upload unvalidated bytes. To add a new kind, create the marker struct and key type, then write an `impl ObjectStorage<NewKind>` block in `common`. `ArtifactKey` (de)serializes as its path, so Kafka messages with a malformed key fail to decode.
 
 ## S3 clients and credentials
 
-**Decision:** every service opens one S3 client **per bucket** (artifacts, logs). Each client has its own HTTP connection pool and **optionally its own credentials**, and does not share connections with the other buckets' clients.
+**Decision:** every service opens one S3 client **per bucket** (currently only artifacts). Each client has its own HTTP connection pool and **optionally its own credentials**, and does not share connections with the other buckets' clients.
 
-- **Why separate clients:** the bucket is part of the client configuration (`object_store`), so one client per bucket is natural. It keeps log uploads from using up the connections that artifact fetches need. Sharing would only save a few idle connections to the same Garage endpoint, which is negligible at our request rates.
-- **Why per-bucket credentials:** least privilege. Runners get a read-only key for artifacts and a write-only key for logs. The control plane gets read/write on artifacts (uploads) and read/delete on logs (serving, retention). If a runner is compromised, it can neither overwrite artifacts nor read other apps' logs.
-- **Configuration:** `<BUCKET>_S3_ACCESS_KEY` / `<BUCKET>_S3_SECRET_KEY` (e.g. `LOG_S3_ACCESS_KEY`) override the shared `S3_ACCESS_KEY` / `S3_SECRET_KEY`. Set both of a pair or neither. Endpoint and region stay shared. Local dev uses only the shared pair. Implemented by `common::env::s3_bucket_config`.
+- **Why separate clients:** the bucket is part of the client configuration (`object_store`), so one client per bucket is natural. It keeps traffic to one bucket from using up the connections another bucket needs. Sharing would only save a few idle connections to the same Garage endpoint, which is negligible at our request rates.
+- **Why per-bucket credentials:** least privilege. Runners get a read-only key for artifacts; the control plane gets read/write (uploads). If a runner is compromised, it cannot overwrite artifacts.
+- **Configuration:** `<BUCKET>_S3_ACCESS_KEY` / `<BUCKET>_S3_SECRET_KEY` (e.g. `ARTIFACT_S3_ACCESS_KEY`) override the shared `S3_ACCESS_KEY` / `S3_SECRET_KEY`. Set both of a pair or neither. Endpoint and region stay shared. Local dev uses only the shared pair. Implemented by `common::env::s3_bucket_config`.
 
 ## Features
 

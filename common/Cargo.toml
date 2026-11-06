@@ -7,9 +7,7 @@ license.workspace = true
 [dependencies]
 async-trait = "0.1.92"
 bytes = "1.12.1"
-chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock", "std"] }
 dotenvy = "0.15.7"
-flate2 = "1.1.10"
 futures = "0.3.34"
 object_store = { version = "0.14.2", features = ["aws"], optional = true }
 rdkafka = { version = "0.39.0", features = ["tokio"], optional = true }

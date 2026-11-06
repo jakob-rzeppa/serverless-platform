@@ -7,7 +7,6 @@
 use super::StorageError;
 
 pub mod artifact;
-pub mod logs;
 
 fn invalid(e: impl std::fmt::Display) -> StorageError {
     StorageError::Invalid(e.to_string())

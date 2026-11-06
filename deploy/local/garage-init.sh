@@ -1,5 +1,5 @@
 #!/bin/sh
-# One-shot setup of the single-node dev Garage: layout, buckets and the dev
+# One-shot setup of the single-node dev Garage: layout, bucket and the dev
 # access key. Runs in the garage container's network namespace with its
 # metadata volume, so the `garage` CLI reaches the node like `docker exec`
 # would. Safe to re-run.
@@ -19,9 +19,7 @@ if ! garage key info "$S3_ACCESS_KEY" >/dev/null 2>&1; then
     garage key import --yes -n dev "$S3_ACCESS_KEY" "$S3_SECRET_KEY"
 fi
 
-for bucket in "$ARTIFACT_BUCKET" "$LOG_BUCKET"; do
-    garage bucket info "$bucket" >/dev/null 2>&1 || garage bucket create "$bucket"
-    garage bucket allow --read --write --owner "$bucket" --key "$S3_ACCESS_KEY"
-done
+garage bucket info "$ARTIFACT_BUCKET" >/dev/null 2>&1 || garage bucket create "$ARTIFACT_BUCKET"
+garage bucket allow --read --write --owner "$ARTIFACT_BUCKET" --key "$S3_ACCESS_KEY"
 
-echo "garage ready: buckets $ARTIFACT_BUCKET, $LOG_BUCKET; key $S3_ACCESS_KEY"
+echo "garage ready: bucket $ARTIFACT_BUCKET; key $S3_ACCESS_KEY"

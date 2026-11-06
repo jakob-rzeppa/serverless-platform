@@ -33,17 +33,6 @@ async fn main(mut req: Request<Body>) -> Result<Response<Body>, Error> {
                 .status(code.parse::<u16>().unwrap())
                 .body(Body::empty())?);
         }
-        // One line on stdout and one on stderr.
-        ["log"] => {
-            println!("out line");
-            eprintln!("err line");
-            "logged".into()
-        }
-        // <bytes> bytes of stdout as 9-byte lines.
-        ["spam", _] => {
-            (0..num(1) / 9).for_each(|_| println!("xxxxxxxx"));
-            "spammed".into()
-        }
         // Sleep in a host call, then answer.
         ["sleep", _] => {
             wstd::task::sleep(Duration::from_millis(num(1)).into()).await;

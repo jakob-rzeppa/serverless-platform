@@ -21,5 +21,4 @@
 
 pub mod bus;
 pub mod env;
-pub mod logs;
 pub mod storage;

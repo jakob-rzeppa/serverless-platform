@@ -5,8 +5,6 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
-bytes = "1.12.1"
-chrono = "0.4.45"
 common = { version = "0.1.0", path = "../common" }
 hex = "0.4.3"
 sha2 = "0.11.1"

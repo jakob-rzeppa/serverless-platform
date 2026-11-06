@@ -5,15 +5,12 @@
 //!   timeouts as [`GuestError::Timeout`].
 //! - [`ArtifactCache`]: object store → sha256 check → disk cache → compiled
 //!   `Component`.
-//! - [`CapturePipe`]: capped stdout/stderr capture, drained as log lines.
 //!
-//! Anything tied to an export (`wasi:http/incoming-handler`), to a Kafka
-//! topic or to a log key layout stays in the runner crate.
+//! Anything tied to an export (`wasi:http/incoming-handler`) or to a Kafka
+//! topic stays in the runner crate.
 
 mod artifacts;
-mod capture;
 mod runtime;
 
 pub use artifacts::{ArtifactCache, ArtifactError, hex_sha256};
-pub use capture::CapturePipe;
 pub use runtime::{GuestError, HasHostState, HostState, Runtime, run_guest};

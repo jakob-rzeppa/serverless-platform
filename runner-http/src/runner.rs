@@ -1,13 +1,10 @@
-//! Wires the deploy consumer, the HTTP server and the log uploader together.
+//! Wires the deploy consumer and the HTTP server together.
 
 use std::{future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 use common::{
     bus::{Subscriber, messages::http_deploy::HttpDeploy},
-    storage::{
-        ObjectStorage,
-        objects::{artifact::Artifact, logs::HttpLogChunk},
-    },
+    storage::{ObjectStorage, objects::artifact::Artifact},
 };
 use hyper::{server::conn::http1, service::service_fn};
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
@@ -15,15 +12,12 @@ use runner_core::{ArtifactCache, Runtime};
 use tokio::{net::TcpListener, sync::watch};
 use tokio_util::task::TaskTracker;
 
-use crate::{
-    apps::AppTable, config::Limits, deploy::Deployer, guest, logs::LogBook, server::Server,
-};
+use crate::{apps::AppTable, config::Limits, deploy::Deployer, guest, server::Server};
 
 /// Adapters injected into the runner (Kafka/S3 in prod, mocks in tests).
 pub struct Deps {
     pub deploys: Subscriber<HttpDeploy>,
     pub artifacts: ObjectStorage<Artifact>,
-    pub logs: ObjectStorage<HttpLogChunk>,
     pub cache_dir: PathBuf,
 }
 
@@ -32,8 +26,6 @@ pub struct Deps {
 pub struct Settings {
     /// Apps are served at `<subdomain>.<apps_domain>`.
     pub apps_domain: String,
-    /// Unique id of this process; used as the log writer id.
-    pub instance: String,
     pub limits: Limits,
 }
 
@@ -53,16 +45,9 @@ impl Runner {
             linker: guest::linker(runtime.engine())?,
             apps: apps.clone(),
         };
-        let logs = Arc::new(LogBook::new(
-            deps.logs,
-            settings.instance,
-            settings.limits.log_app_max_bytes_per_hour,
-            settings.limits.log_flush_bytes,
-        ));
         let server = Arc::new(Server {
             runtime,
             apps,
-            logs,
             apps_domain: settings.apps_domain.trim_matches('.').to_ascii_lowercase(),
             limits: settings.limits,
             guests: TaskTracker::new(),
@@ -73,8 +58,8 @@ impl Runner {
     /// Serve `listener` and apply deploys until `shutdown` resolves.
     ///
     /// On shutdown: stop accepting connections, let in-flight requests finish
-    /// (up to the request timeout plus a grace period), stop consuming
-    /// deploys, then upload the remaining logs.
+    /// (up to the request timeout plus a grace period), then stop consuming
+    /// deploys.
     pub async fn run(
         self,
         listener: TcpListener,
@@ -91,12 +76,6 @@ impl Runner {
         let deployer = tokio::spawn({
             let stop = stopped();
             async move { self.deployer.run(stop).await }
-        });
-        let flusher = tokio::spawn({
-            let logs = self.server.logs.clone();
-            let every = self.server.limits.log_flush_interval;
-            let stop = stopped();
-            async move { logs.run(every, stop).await }
         });
 
         let graceful = GracefulShutdown::new();
@@ -144,8 +123,6 @@ impl Runner {
 
         let _ = stop_tx.send(true);
         let _ = deployer.await;
-        let _ = flusher.await;
-        self.server.logs.flush().await;
         Ok(())
     }
 }

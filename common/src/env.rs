@@ -71,7 +71,7 @@ pub enum EnvError {
 ///
 /// Each bucket gets its own client anyway (the bucket is part of the client
 /// config), so per-bucket credentials cost nothing and let production scope
-/// keys tightly, e.g. read-only artifacts and write-only logs for runners.
+/// keys tightly, e.g. read-only artifacts for runners.
 /// Local dev just sets the shared pair.
 #[cfg(feature = "s3")]
 pub fn s3_bucket_config(bucket: &str) -> Result<crate::storage::backend::s3::S3Config, EnvError> {
@@ -131,15 +131,15 @@ mod tests {
         ("S3_ENDPOINT", "http://localhost:3900"),
         ("S3_ACCESS_KEY", "shared-key"),
         ("S3_SECRET_KEY", "shared-secret"),
-        ("LOG_BUCKET", "logs"),
+        ("ARTIFACT_BUCKET", "apps"),
     ];
 
     #[test]
     fn falls_back_to_shared_credentials() {
-        let cfg = s3_bucket_config_from("LOG", lookup(&SHARED)).unwrap();
+        let cfg = s3_bucket_config_from("ARTIFACT", lookup(&SHARED)).unwrap();
         assert_eq!(
             (cfg.bucket.as_str(), cfg.region.as_str()),
-            ("logs", "garage")
+            ("apps", "garage")
         );
         assert_eq!(
             (cfg.access_key.as_str(), cfg.secret_key.as_str()),
@@ -151,22 +151,22 @@ mod tests {
     fn per_bucket_credentials_override() {
         let mut vars = SHARED.to_vec();
         vars.extend([
-            ("LOG_S3_ACCESS_KEY", "log-key"),
-            ("LOG_S3_SECRET_KEY", "log-secret"),
+            ("ARTIFACT_S3_ACCESS_KEY", "artifact-key"),
+            ("ARTIFACT_S3_SECRET_KEY", "artifact-secret"),
         ]);
-        let cfg = s3_bucket_config_from("LOG", lookup(&vars)).unwrap();
+        let cfg = s3_bucket_config_from("ARTIFACT", lookup(&vars)).unwrap();
         assert_eq!(
             (cfg.access_key.as_str(), cfg.secret_key.as_str()),
-            ("log-key", "log-secret")
+            ("artifact-key", "artifact-secret")
         );
     }
 
     #[test]
     fn half_set_pair_is_an_error() {
         let mut vars = SHARED.to_vec();
-        vars.push(("LOG_S3_ACCESS_KEY", "log-key"));
+        vars.push(("ARTIFACT_S3_ACCESS_KEY", "artifact-key"));
         assert!(matches!(
-            s3_bucket_config_from("LOG", lookup(&vars)),
+            s3_bucket_config_from("ARTIFACT", lookup(&vars)),
             Err(EnvError::Incomplete { .. })
         ));
     }
@@ -175,10 +175,10 @@ mod tests {
     fn per_bucket_pair_works_without_shared_pair() {
         let vars = [
             ("S3_ENDPOINT", "http://x"),
-            ("LOG_BUCKET", "logs"),
-            ("LOG_S3_ACCESS_KEY", "k"),
-            ("LOG_S3_SECRET_KEY", "s"),
+            ("ARTIFACT_BUCKET", "apps"),
+            ("ARTIFACT_S3_ACCESS_KEY", "k"),
+            ("ARTIFACT_S3_SECRET_KEY", "s"),
         ];
-        assert!(s3_bucket_config_from("LOG", lookup(&vars)).is_ok());
+        assert!(s3_bucket_config_from("ARTIFACT", lookup(&vars)).is_ok());
     }
 }

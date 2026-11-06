@@ -4,15 +4,13 @@
 use std::{convert::Infallible, sync::Arc};
 
 use bytes::Bytes;
-use chrono::Utc;
-use common::logs::{LogLine, Stream};
 use http_body_util::{BodyExt, Full};
 use hyper::{
     Request, Response, StatusCode,
     body::Incoming,
     header::{HOST, HeaderValue},
 };
-use runner_core::{CapturePipe, GuestError, HostState, Runtime, run_guest};
+use runner_core::{GuestError, HostState, Runtime, run_guest};
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 use wasmtime_wasi::WasiCtx;
@@ -25,7 +23,6 @@ use crate::{
     apps::{App, AppTable},
     config::Limits,
     guest::GuestState,
-    logs::LogBook,
 };
 
 /// Header carrying the request id, set on the request the guest sees and on
@@ -36,10 +33,9 @@ pub const REQUEST_ID: &str = "x-request-id";
 pub struct Server {
     pub runtime: Runtime,
     pub apps: Arc<AppTable>,
-    pub logs: Arc<LogBook>,
     pub apps_domain: String,
     pub limits: Limits,
-    /// Guest tasks, so shutdown can wait for their logs.
+    /// Guest tasks, so shutdown can wait for them to finish.
     pub guests: TaskTracker,
 }
 
@@ -99,13 +95,8 @@ impl Server {
         request_id: &str,
     ) -> Response<HyperOutgoingBody> {
         let timeout = self.limits.request_timeout;
-        let stdout = CapturePipe::new(self.limits.log_request_max_bytes);
-        let stderr = CapturePipe::new(self.limits.log_request_max_bytes);
-        let ctx = WasiCtx::builder()
-            .envs(&app.env)
-            .stdout(stdout.clone())
-            .stderr(stderr.clone())
-            .build();
+        // No stdout/stderr configured: guest output is discarded.
+        let ctx = WasiCtx::builder().envs(&app.env).build();
         let mut store = self.runtime.new_store(
             GuestState::new(HostState::new(ctx, self.limits.memory_bytes)),
             timeout,
@@ -128,15 +119,13 @@ impl Server {
         let (wasi_req, out) = match resources {
             Ok(r) => r,
             Err(e) => {
-                self.log_system(&app, request_id, format!("invalid request: {e:#}"));
+                tracing::warn!(app_id = %app.app_id, request_id, "invalid request: {e:#}");
                 return text(StatusCode::BAD_REQUEST, "invalid request");
             }
         };
 
         // The guest runs on its own task: it may keep streaming the body
-        // after the response head is sent. Its logs are recorded once it
-        // finishes.
-        let logs = self.logs.clone();
+        // after the response head is sent.
         let guest = self.guests.spawn({
             let app = app.clone();
             let request_id = request_id.to_string();
@@ -149,17 +138,9 @@ impl Server {
                         .await
                 })
                 .await;
-                drop(store);
-
-                let ts = Utc::now();
-                let rid = Some(request_id.as_str());
-                let mut lines = stdout.drain_log_lines(Stream::Stdout, true, ts, rid);
-                lines.extend(stderr.drain_log_lines(Stream::Stderr, true, ts, rid));
                 if let Err(error) = &result {
                     tracing::warn!(app_id = %app.app_id, request_id, %error, "request failed");
-                    lines.push(system_line(&request_id, format!("request failed: {error}")));
                 }
-                logs.record(app.app_id, lines);
                 result
             }
         });
@@ -167,7 +148,7 @@ impl Server {
         match rx.await {
             Ok(Ok(resp)) => resp,
             Ok(Err(code)) => {
-                self.log_system(&app, request_id, format!("guest returned error: {code:?}"));
+                tracing::warn!(app_id = %app.app_id, request_id, "guest returned error: {code:?}");
                 text(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
             }
             // The guest finished (or was stopped) without sending a response.
@@ -176,7 +157,7 @@ impl Server {
                     text(StatusCode::GATEWAY_TIMEOUT, "request timed out")
                 }
                 Ok(Ok(())) => {
-                    self.log_system(&app, request_id, "guest sent no response".into());
+                    tracing::warn!(app_id = %app.app_id, request_id, "guest sent no response");
                     text(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
                 }
                 Ok(Err(GuestError::Error(_))) | Err(_) => {
@@ -184,21 +165,6 @@ impl Server {
                 }
             },
         }
-    }
-
-    fn log_system(&self, app: &App, request_id: &str, line: String) {
-        tracing::warn!(app_id = %app.app_id, request_id, "{line}");
-        self.logs
-            .record(app.app_id, vec![system_line(request_id, line)]);
-    }
-}
-
-fn system_line(request_id: &str, line: String) -> LogLine {
-    LogLine {
-        ts: Utc::now(),
-        stream: Stream::System,
-        line,
-        request_id: Some(request_id.to_string()),
     }
 }
 

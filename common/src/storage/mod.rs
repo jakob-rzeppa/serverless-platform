@@ -1,8 +1,7 @@
 //! Object storage port (Garage / any S3 in production).
 //!
 //! Storage is typed: [`ObjectStorage<O>`] is a handle to one bucket holding
-//! objects of kind `O` (a marker type such as [`objects::artifact::Artifact`] or
-//! [`objects::logs::HttpLogChunk`]). The operations are implemented per kind in
+//! objects of kind `O` (a marker type such as [`objects::artifact::Artifact`]). The operations are implemented per kind in
 //! `impl ObjectStorage<Kind>` blocks (see [`objects`]), each taking that
 //! kind's key and contents types and validating / encoding them, so only
 //! well-formed keys and valid contents can be uploaded. The raw string/bytes
@@ -75,36 +74,25 @@ mod tests {
 
     use super::{
         backend::memory::MemoryStorage,
-        objects::{
-            artifact::{Artifact, ArtifactKey},
-            logs::{HttpLogChunk, HttpLogKey, HttpLogPrefix},
-        },
+        objects::artifact::{Artifact, ArtifactKey},
         *,
     };
-    use crate::logs::{LogLine, Stream};
+
+    /// Smallest valid component header (magic + component version/layer).
+    const COMPONENT: &[u8] = b"\0asm\x0d\0\x01\0";
 
     #[tokio::test]
     async fn rejects_invalid_contents_without_writing() {
         let raw = MemoryStorage::new();
         let artifacts = ObjectStorage::<Artifact>::memory(&raw);
-        let logs = ObjectStorage::<HttpLogChunk>::memory(&raw);
         let key = ArtifactKey {
             app_id: Uuid::new_v4(),
             version_id: Uuid::new_v4(),
-        };
-        let log_key = HttpLogKey {
-            prefix: HttpLogPrefix::new(key.app_id, chrono::Utc::now()),
-            writer: "pod-1".into(),
-            seq: 0,
         };
 
         let not_wasm = Bytes::from_static(b"not wasm");
         assert!(matches!(
             artifacts.put(&key, &not_wasm).await,
-            Err(StorageError::Invalid(_))
-        ));
-        assert!(matches!(
-            logs.put(&log_key, &[]).await,
             Err(StorageError::Invalid(_))
         ));
         assert!(raw.keys().is_empty());
@@ -113,31 +101,21 @@ mod tests {
     #[tokio::test]
     async fn typed_put_get_list_delete() {
         let raw = MemoryStorage::new();
-        let logs = ObjectStorage::<HttpLogChunk>::memory(&raw);
-        let prefix = HttpLogPrefix::new(Uuid::new_v4(), chrono::Utc::now());
-        let key = |seq| HttpLogKey {
-            prefix,
-            writer: "pod-1".into(),
-            seq,
+        let artifacts = ObjectStorage::<Artifact>::memory(&raw);
+        let app_id = Uuid::new_v4();
+        let key = ArtifactKey {
+            app_id,
+            version_id: Uuid::new_v4(),
         };
-        let lines = vec![LogLine {
-            ts: chrono::Utc::now(),
-            stream: Stream::Stdout,
-            line: "hi".into(),
-            request_id: Some("r1".into()),
-        }];
+        let component = Bytes::from_static(COMPONENT);
 
-        logs.put(&key(1), &lines).await.unwrap();
-        logs.put(&key(0), &lines).await.unwrap();
-        raw.insert(&format!("{}junk.txt", prefix.path()), "x");
-        assert_eq!(
-            logs.list_log_chunks(&prefix).await.unwrap(),
-            vec![key(0), key(1)]
-        );
-        assert_eq!(logs.get(&key(1)).await.unwrap(), lines);
-        logs.delete(&key(1)).await.unwrap();
+        artifacts.put(&key, &component).await.unwrap();
+        raw.insert(&format!("apps/{app_id}/junk.txt"), "x");
+        assert_eq!(artifacts.list_app_versions(app_id).await.unwrap(), vec![key]);
+        assert_eq!(artifacts.get(&key).await.unwrap(), component);
+        artifacts.delete(&key).await.unwrap();
         assert!(matches!(
-            logs.get(&key(1)).await,
+            artifacts.get(&key).await,
             Err(StorageError::NotFound(_))
         ));
     }

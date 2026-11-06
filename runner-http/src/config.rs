@@ -4,25 +4,16 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use common::{
     env::{EnvError, parse_or, required, s3_bucket_config},
-    storage::{backend::s3::S3Config, objects::logs::valid_writer},
+    storage::backend::s3::S3Config,
 };
 
-/// Per-request sandbox and logging limits.
+/// Per-request sandbox limits.
 #[derive(Debug, Clone)]
 pub struct Limits {
     /// Wall-clock limit for one request, including streaming the body.
     pub request_timeout: Duration,
     /// Linear memory cap per request instance.
     pub memory_bytes: usize,
-    /// Captured bytes per stream (stdout / stderr) of one request; excess is
-    /// dropped with a marker.
-    pub log_request_max_bytes: usize,
-    /// Log bytes kept per app and UTC hour; excess is dropped with a marker.
-    pub log_app_max_bytes_per_hour: usize,
-    /// How often buffered log lines are uploaded.
-    pub log_flush_interval: Duration,
-    /// Upload an app's buffered lines early once they reach this size.
-    pub log_flush_bytes: usize,
 }
 
 impl Default for Limits {
@@ -30,10 +21,6 @@ impl Default for Limits {
         Self {
             request_timeout: Duration::from_secs(30),
             memory_bytes: 128 << 20,
-            log_request_max_bytes: 1 << 20,
-            log_app_max_bytes_per_hour: 100 << 20,
-            log_flush_interval: Duration::from_secs(5),
-            log_flush_bytes: 1 << 20,
         }
     }
 }
@@ -43,7 +30,6 @@ pub struct Config {
     // shared (project-root .env)
     pub kafka_brokers: String,
     pub artifacts: S3Config,
-    pub logs: S3Config,
     // runner-http specific (runner-http/.env)
     pub listen_addr: SocketAddr,
     /// Apps are served at `<subdomain>.<apps_domain>`.
@@ -60,16 +46,9 @@ impl Config {
         let pod_name = std::env::var("POD_NAME")
             .or_else(|_| std::env::var("HOSTNAME"))
             .unwrap_or_else(|_| "local".to_string());
-        if !valid_writer(&pod_name) {
-            return Err(EnvError::Invalid {
-                name: "POD_NAME".into(),
-                value: pod_name,
-            });
-        }
         Ok(Self {
             kafka_brokers: required("KAFKA_BROKERS")?,
             artifacts: s3_bucket_config("ARTIFACT")?,
-            logs: s3_bucket_config("LOG")?,
             listen_addr: parse_or("LISTEN_ADDR", SocketAddr::from(([0, 0, 0, 0], 8080)))?,
             apps_domain: required("APPS_DOMAIN")?
                 .trim_matches('.')
@@ -79,13 +58,6 @@ impl Config {
             limits: Limits {
                 request_timeout: secs("REQUEST_TIMEOUT_SECS", d.request_timeout)?,
                 memory_bytes: parse_or("MEMORY_LIMIT_MB", d.memory_bytes >> 20)? << 20,
-                log_request_max_bytes: parse_or("LOG_REQUEST_MAX_BYTES", d.log_request_max_bytes)?,
-                log_app_max_bytes_per_hour: parse_or(
-                    "LOG_APP_MAX_BYTES_PER_HOUR",
-                    d.log_app_max_bytes_per_hour,
-                )?,
-                log_flush_interval: secs("LOG_FLUSH_SECS", d.log_flush_interval)?,
-                log_flush_bytes: parse_or("LOG_FLUSH_BYTES", d.log_flush_bytes)?,
             },
         })
     }

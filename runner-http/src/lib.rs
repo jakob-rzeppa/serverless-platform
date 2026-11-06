@@ -7,18 +7,17 @@
 //!   replica replays the whole topic on start.
 //! - [`server`]: `<subdomain>.<APPS_DOMAIN>` → app → fresh instance per
 //!   request, with memory cap, timeout and no outgoing network.
-//! - [`logs`]: per-request stdout/stderr, tagged with the request id,
-//!   batched per app and uploaded as `http/<app>/<date>/<hour>/…` chunks.
+//!
+//! Guest stdout/stderr is discarded for now (app logging is on the roadmap).
 //!
 //! runner-http publishes no Kafka messages. The Wasmtime host pieces live in
-//! `runner_core`. The binary (`main.rs`) wires real
-//! adapters (Kafka, S3); tests wire the mocks from `common` (feature `mock`).
+//! `runner_core`. The binary (`main.rs`) wires real adapters (Kafka, S3);
+//! tests wire the mocks from `common` (feature `mock`).
 
 pub mod apps;
 pub mod config;
 pub mod deploy;
 pub mod guest;
-pub mod logs;
 pub mod runner;
 pub mod server;
 
